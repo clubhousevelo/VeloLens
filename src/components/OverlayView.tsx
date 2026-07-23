@@ -14,6 +14,8 @@ import ToolStrip from './ToolStrip';
 import ActionStrip from './ActionStrip';
 import type { ToolStripPanel } from './ToolStrip';
 import { isMediaFile } from '../lib/videoFile';
+import type { CameraCaptureHandle } from '../hooks/useCameraCapture';
+import CameraControls from './CameraControls';
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -25,42 +27,70 @@ function formatTime(seconds: number): string {
 function VideoControls({
   label,
   handle,
+  camera,
   markupHandle,
   onRemove,
 }: {
   label: string;
   handle: VideoPlayerHandle;
+  camera: CameraCaptureHandle;
   markupHandle?: MarkupHandle;
   onRemove?: () => void;
 }) {
   const { state, selectFile, clearVideo, togglePlay, scrub, setTrimStart, setTrimEnd, stepFrame } = handle;
-  const handleRemove = () => { clearVideo(); onRemove?.(); };
+  const handleRemove = () => { camera.stopCamera(); clearVideo(); onRemove?.(); };
+  const handleSelectFile = () => { camera.stopCamera(); selectFile(); };
   const repeatBack = useRepeatWhilePressed(() => stepFrame(-1));
   const repeatFwd = useRepeatWhilePressed(() => stepFrame(1));
 
-  if (!state.src) {
+  if (!state.src && !camera.state.active) {
     return (
       <div className="space-y-2">
         <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{label}</div>
-        <button
-          onClick={selectFile}
-          className="w-full py-3 border border-dashed border-slate-600 rounded-lg text-slate-400 text-sm hover:border-blue-400 hover:text-blue-400 transition-colors"
-        >
-          Select video or image
-        </button>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={handleSelectFile}
+            className="py-3 border border-dashed border-slate-600 rounded-lg text-slate-400 text-sm hover:border-blue-400 hover:text-blue-400 transition-colors"
+          >
+            Select video or image
+          </button>
+          <button
+            onClick={() => void camera.startCamera()}
+            className="py-3 border border-dashed border-slate-600 rounded-lg text-blue-400 text-sm hover:border-blue-400 hover:text-blue-300 transition-colors"
+          >
+            Live camera
+          </button>
+        </div>
+        {camera.state.error && <div className="text-[11px] text-amber-400">{camera.state.error}</div>}
       </div>
     );
   }
 
-  const isImage = state.mediaType === 'image';
+  const isImage = !camera.state.active && state.mediaType === 'image';
 
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between">
         <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{label}</div>
-        <div className="text-xs text-slate-500 truncate max-w-[75%] min-w-0">{state.fileName}</div>
+        <div className="text-xs text-slate-500 truncate max-w-[75%] min-w-0">
+          {camera.state.active ? (camera.state.recording ? 'Recording live camera' : 'Live camera') : state.fileName}
+        </div>
       </div>
-      {!isImage && (
+      {camera.state.active && (
+        <div className="grid grid-cols-[1fr_auto] items-center min-h-10">
+          <CameraControls camera={camera} compact />
+          <div className="flex items-center gap-1 min-w-0 justify-end">
+            <button onClick={handleSelectFile} className="text-[11px] text-slate-500 hover:text-slate-300 py-0.5 transition-colors">
+              Change
+            </button>
+            <span className="text-[11px] text-slate-700">|</span>
+            <button onClick={handleRemove} className="text-[11px] text-slate-600 hover:text-red-400 py-0.5 transition-colors">
+              Remove
+            </button>
+          </div>
+        </div>
+      )}
+      {!camera.state.active && !isImage && (
         <>
           <ScrubberWithTrim
             duration={state.duration}
@@ -78,8 +108,9 @@ function VideoControls({
             <span className="text-slate-500">/ {formatTime(Math.max(0, state.trimEnd - state.trimStart))}</span>
           </div>
           <div className="flex items-center justify-between w-full gap-1 sm:grid sm:grid-cols-[1fr_auto_1fr]">
-            {/* Left spacer — hidden on mobile so flex sees only 2 items; visible on desktop for 3-col grid centering */}
-            <div className="hidden sm:block" />
+            <div className="flex items-center min-w-0">
+              <CameraControls camera={camera} compact />
+            </div>
             <div className="flex items-center gap-1 shrink-0">
               <button onPointerDown={(e) => repeatBack.onPointerDown(e)} className="p-1.5 text-slate-400 hover:text-white transition-colors rounded hover:bg-slate-800 select-none" title="Previous frame (hold to scrub)">
                 <svg className="w-4 h-4 pointer-events-none" fill="currentColor" viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" /></svg>
@@ -96,7 +127,7 @@ function VideoControls({
               </button>
             </div>
             <div className="flex items-center gap-1 min-w-0 shrink-0 sm:justify-end">
-              <button onClick={selectFile} className="text-[11px] text-slate-500 hover:text-slate-300 py-0.5 transition-colors">
+              <button onClick={handleSelectFile} className="text-[11px] text-slate-500 hover:text-slate-300 py-0.5 transition-colors">
                 Change
               </button>
               <span className="text-[11px] text-slate-700">|</span>
@@ -107,10 +138,11 @@ function VideoControls({
           </div>
         </>
       )}
-      {isImage && (
-        <div className="flex items-center justify-end w-full">
+      {!camera.state.active && isImage && (
+        <div className="flex items-center justify-between w-full">
+          <CameraControls camera={camera} compact />
           <div className="flex items-center gap-2">
-            <button onClick={selectFile} className="text-xs text-slate-500 hover:text-slate-300 py-0.5 transition-colors">
+            <button onClick={handleSelectFile} className="text-xs text-slate-500 hover:text-slate-300 py-0.5 transition-colors">
               Change
             </button>
             <span className="text-slate-700">|</span>
@@ -120,6 +152,7 @@ function VideoControls({
           </div>
         </div>
       )}
+      {camera.state.error && <div className="text-[11px] text-amber-400">{camera.state.error}</div>}
     </div>
   );
 }
@@ -127,6 +160,8 @@ function VideoControls({
 interface OverlayViewProps {
   handle1: VideoPlayerHandle;
   handle2: VideoPlayerHandle;
+  camera1: CameraCaptureHandle;
+  camera2: CameraCaptureHandle;
   markupHandle1: MarkupHandle;
   markupHandle2: MarkupHandle;
   activeVideo?: 1 | 2;
@@ -154,7 +189,7 @@ interface OverlayViewProps {
   updateGrid2?: (g: Partial<GridSettings>) => void;
 }
 
-export default function OverlayView({ handle1, handle2, markupHandle1, markupHandle2, activeVideo, onActivate1, onActivate2, onRemoveVideo1, onRemoveVideo2, onDropFile, onTransformChange1, onTransformReset1, onTransformChange2, onTransformReset2, syncTransform, onSyncToggle, onImageAdjustChange1, onImageAdjustReset1, onImageAdjustChange2, onImageAdjustReset2, syncImageAdjust, onSyncImageAdjustToggle, syncGrid, onSyncGridToggle, updateGrid1, updateGrid2 }: OverlayViewProps) {
+export default function OverlayView({ handle1, handle2, camera1, camera2, markupHandle1, markupHandle2, activeVideo, onActivate1, onActivate2, onRemoveVideo1, onRemoveVideo2, onDropFile, onTransformChange1, onTransformReset1, onTransformChange2, onTransformReset2, syncTransform, onSyncToggle, onImageAdjustChange1, onImageAdjustReset1, onImageAdjustChange2, onImageAdjustReset2, syncImageAdjust, onSyncImageAdjustToggle, syncGrid, onSyncGridToggle, updateGrid1, updateGrid2 }: OverlayViewProps) {
   const gammaFilterId1 = useId();
   const gammaFilterId2 = useId();
   const [blendPosition, setBlendPosition] = useState(50);
@@ -176,8 +211,8 @@ export default function OverlayView({ handle1, handle2, markupHandle1, markupHan
     return () => ro.disconnect();
   }, []);
 
-  const hasSrc1 = !!handle1.state.src;
-  const hasSrc2 = !!handle2.state.src;
+  const hasSrc1 = camera1.state.active || !!handle1.state.src;
+  const hasSrc2 = camera2.state.active || !!handle2.state.src;
   const bothLoaded = hasSrc1 && hasSrc2;
 
   const opacity2 = blendPosition / 100;
@@ -343,7 +378,7 @@ export default function OverlayView({ handle1, handle2, markupHandle1, markupHan
           <div className="absolute inset-0">
             <GammaFilterSvg id={gammaFilterId1} gamma={adj1.gamma} />
             <GammaFilterSvg id={gammaFilterId2} gamma={adj2.gamma} />
-            {handle1.state.src && (
+            {hasSrc1 && (
               <div
                 className="absolute inset-0 flex items-center justify-center overflow-hidden"
                 style={{
@@ -352,9 +387,22 @@ export default function OverlayView({ handle1, handle2, markupHandle1, markupHan
                   pointerEvents: blendPosition === 100 ? 'none' : undefined,
                 }}
               >
-                {handle1.state.mediaType === 'image' ? (
+                {camera1.state.active ? (
+                  <video
+                    ref={camera1.videoRef}
+                    style={{
+                      ...mediaSize(camera1.state.width, camera1.state.height),
+                      transform: `translate(${effectiveTransform1.translateX}px, ${-effectiveTransform1.translateY}px) scale(${effectiveTransform1.scale})`,
+                      transformOrigin: 'center center',
+                      filter: imageAdjustToFilter(adj1, gammaFilterId1),
+                    }}
+                    autoPlay
+                    muted
+                    playsInline
+                  />
+                ) : handle1.state.mediaType === 'image' ? (
                   <img
-                    src={handle1.state.src}
+                    src={handle1.state.src ?? undefined}
                     alt=""
                     style={{
                       ...mediaSize(handle1.state.videoWidth, handle1.state.videoHeight),
@@ -366,7 +414,7 @@ export default function OverlayView({ handle1, handle2, markupHandle1, markupHan
                 ) : (
                   <video
                     ref={handle1.videoRef}
-                    src={handle1.state.src}
+                    src={handle1.state.src ?? undefined}
                     style={{
                       ...mediaSize(handle1.state.videoWidth, handle1.state.videoHeight),
                       transform: `translate(${effectiveTransform1.translateX}px, ${-effectiveTransform1.translateY}px) scale(${effectiveTransform1.scale})`,
@@ -380,7 +428,9 @@ export default function OverlayView({ handle1, handle2, markupHandle1, markupHan
                 <MarkupOverlay
                   handle={markupHandle1}
                   transform={t1}
-                  videoAR={handle1.state.videoWidth && handle1.state.videoHeight ? handle1.state.videoWidth / handle1.state.videoHeight : 0}
+                  videoAR={camera1.state.active
+                    ? (camera1.state.width && camera1.state.height ? camera1.state.width / camera1.state.height : 0)
+                    : (handle1.state.videoWidth && handle1.state.videoHeight ? handle1.state.videoWidth / handle1.state.videoHeight : 0)}
                   currentTime={handle1.state.currentTime}
                   onOpenToolPanel={(type) => { onActivate1?.(); setActivePanel1(type); }}
                   onClosePanel={() => setActivePanel1(null)}
@@ -388,7 +438,7 @@ export default function OverlayView({ handle1, handle2, markupHandle1, markupHan
               </div>
             )}
 
-            {handle2.state.src && (
+            {hasSrc2 && (
               <div
                 className="absolute inset-0 flex items-center justify-center overflow-hidden"
                 style={{
@@ -397,9 +447,22 @@ export default function OverlayView({ handle1, handle2, markupHandle1, markupHan
                   pointerEvents: blendPosition === 0 ? 'none' : (blendPosition >= 1 && blendPosition <= 99 && activeVideo === 1 ? 'none' : undefined),
                 }}
               >
-                {handle2.state.mediaType === 'image' ? (
+                {camera2.state.active ? (
+                  <video
+                    ref={camera2.videoRef}
+                    style={{
+                      ...mediaSize(camera2.state.width, camera2.state.height),
+                      transform: `translate(${effectiveTransform2.translateX}px, ${-effectiveTransform2.translateY}px) scale(${effectiveTransform2.scale})`,
+                      transformOrigin: 'center center',
+                      filter: imageAdjustToFilter(adj2, gammaFilterId2),
+                    }}
+                    autoPlay
+                    muted
+                    playsInline
+                  />
+                ) : handle2.state.mediaType === 'image' ? (
                   <img
-                    src={handle2.state.src}
+                    src={handle2.state.src ?? undefined}
                     alt=""
                     style={{
                       ...mediaSize(handle2.state.videoWidth, handle2.state.videoHeight),
@@ -411,7 +474,7 @@ export default function OverlayView({ handle1, handle2, markupHandle1, markupHan
                 ) : (
                   <video
                     ref={handle2.videoRef}
-                    src={handle2.state.src}
+                    src={handle2.state.src ?? undefined}
                     style={{
                       ...mediaSize(handle2.state.videoWidth, handle2.state.videoHeight),
                       transform: `translate(${effectiveTransform2.translateX}px, ${-effectiveTransform2.translateY}px) scale(${effectiveTransform2.scale})`,
@@ -425,7 +488,9 @@ export default function OverlayView({ handle1, handle2, markupHandle1, markupHan
                 <MarkupOverlay
                   handle={markupHandle2}
                   transform={t2}
-                  videoAR={handle2.state.videoWidth && handle2.state.videoHeight ? handle2.state.videoWidth / handle2.state.videoHeight : 0}
+                  videoAR={camera2.state.active
+                    ? (camera2.state.width && camera2.state.height ? camera2.state.width / camera2.state.height : 0)
+                    : (handle2.state.videoWidth && handle2.state.videoHeight ? handle2.state.videoWidth / handle2.state.videoHeight : 0)}
                   currentTime={handle2.state.currentTime}
                   onOpenToolPanel={(type) => { onActivate2?.(); setActivePanel2(type); }}
                   onClosePanel={() => setActivePanel2(null)}
@@ -433,7 +498,7 @@ export default function OverlayView({ handle1, handle2, markupHandle1, markupHan
               </div>
             )}
 
-            {!handle1.state.src && !handle2.state.src && !dragOver && (
+            {!hasSrc1 && !hasSrc2 && !dragOver && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-slate-500 text-sm pointer-events-none text-center px-4">
                 <span>Drag and drop videos / images here</span>
                 <span className="text-slate-600 text-xs">or select below</span>
@@ -563,12 +628,14 @@ export default function OverlayView({ handle1, handle2, markupHandle1, markupHan
         <VideoControls
           label="Video 1"
           handle={handle1}
+          camera={camera1}
           markupHandle={markupHandle1}
           onRemove={onRemoveVideo1}
         />
         <VideoControls
           label="Video 2"
           handle={handle2}
+          camera={camera2}
           markupHandle={markupHandle2}
           onRemove={onRemoveVideo2}
         />

@@ -15,10 +15,13 @@ import ActionStrip from './ActionStrip';
 import { DEFAULT_TRANSFORM, DEFAULT_IMAGE_ADJUST } from '../hooks/useVideoPlayer';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { isMediaFile } from '../lib/videoFile';
+import type { CameraCaptureHandle } from '../hooks/useCameraCapture';
+import CameraControls from './CameraControls';
 
 interface VideoPlayerProps {
   label: string;
   handle: VideoPlayerHandle;
+  camera: CameraCaptureHandle;
   markupHandle: MarkupHandle;
   /** Toolbar on 'left' (toolbar left of video) or 'right' (toolbar right of video) */
   side: 'left' | 'right';
@@ -47,11 +50,14 @@ function formatTime(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}.${ms}`;
 }
 
-export default function VideoPlayer({ label, handle, markupHandle, side, isActive, onActivate, onRemoveVideo, onDropFile, onTransformChange, onTransformReset, syncTransform, onSyncToggle, onImageAdjustChange, onImageAdjustReset, syncImageAdjust, onSyncImageAdjustToggle, syncGrid, onSyncGridToggle, updateGridOverride }: VideoPlayerProps) {
+export default function VideoPlayer({ label, handle, camera, markupHandle, side, isActive, onActivate, onRemoveVideo, onDropFile, onTransformChange, onTransformReset, syncTransform, onSyncToggle, onImageAdjustChange, onImageAdjustReset, syncImageAdjust, onSyncImageAdjustToggle, syncGrid, onSyncGridToggle, updateGridOverride }: VideoPlayerProps) {
   const gammaFilterId = useId();
-  const videoAR = handle.state.videoWidth && handle.state.videoHeight ? handle.state.videoWidth / handle.state.videoHeight : 0;
+  const videoWidth = camera.state.active ? camera.state.width : handle.state.videoWidth;
+  const videoHeight = camera.state.active ? camera.state.height : handle.state.videoHeight;
+  const videoAR = videoWidth && videoHeight ? videoWidth / videoHeight : 0;
   const { state, videoRef, selectFile, clearVideo, togglePlay, scrub, setTrimStart, setTrimEnd, stepFrame, setVolume, setMuted, toggleMute, setTransform, resetTransform, setImageAdjust, resetImageAdjust } = handle;
   const { src: videoSrc, fileName, duration, currentTime, isPlaying, trimStart, trimEnd, transform, imageAdjust } = state;
+  const hasMedia = camera.state.active || !!videoSrc;
 
   const [activePanel, setActivePanel] = useState<ToolStripPanel | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -133,8 +139,14 @@ export default function VideoPlayer({ label, handle, markupHandle, side, isActiv
   }, [activePanel]);
 
   const handleRemove = () => {
+    camera.stopCamera();
     clearVideo();
     onRemoveVideo?.();
+  };
+
+  const handleSelectFile = () => {
+    camera.stopCamera();
+    selectFile();
   };
 
   const popupContent = activePanel === 'transform' ? (
@@ -196,7 +208,7 @@ export default function VideoPlayer({ label, handle, markupHandle, side, isActiv
       className="flex flex-col h-full min-h-0 overflow-visible"
       onClick={onActivate}
     >
-      {videoSrc ? (
+      {hasMedia ? (
         <div className="flex flex-1 min-h-0 gap-2 items-stretch">
           {stripOnLeft && stripColumn}
 
@@ -209,9 +221,22 @@ export default function VideoPlayer({ label, handle, markupHandle, side, isActiv
               onDrop={handleDrop}
             >
             <GammaFilterSvg id={gammaFilterId} gamma={imageAdjust.gamma} />
-            {handle.state.mediaType === 'image' ? (
+            {camera.state.active ? (
+              <video
+                ref={camera.videoRef}
+                style={{
+                  ...mediaStyle,
+                  transform: `translate(${transform.translateX}px, ${-transform.translateY}px) scale(${transform.scale})`,
+                  transformOrigin: 'center center',
+                  filter: imageAdjustToFilter(imageAdjust, gammaFilterId),
+                }}
+                autoPlay
+                muted
+                playsInline
+              />
+            ) : handle.state.mediaType === 'image' ? (
               <img
-                src={videoSrc}
+                src={videoSrc ?? undefined}
                 alt=""
                 style={{
                   ...mediaStyle,
@@ -223,7 +248,7 @@ export default function VideoPlayer({ label, handle, markupHandle, side, isActiv
             ) : (
               <video
                 ref={videoRef}
-                src={videoSrc}
+                src={videoSrc ?? undefined}
                 style={{
                   ...mediaStyle,
                   transform: `translate(${transform.translateX}px, ${-transform.translateY}px) scale(${transform.scale})`,
@@ -238,7 +263,12 @@ export default function VideoPlayer({ label, handle, markupHandle, side, isActiv
             <div className="absolute top-3 left-3 bg-black/60 backdrop-blur-sm text-xs font-semibold text-white px-2.5 py-1 rounded-md pointer-events-none">
               {label}
             </div>
-            {fileName && (
+            {camera.state.active ? (
+              <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-red-950/75 backdrop-blur-sm text-xs text-red-200 px-2.5 py-1 rounded-md pointer-events-none">
+                <span className={`w-2 h-2 rounded-full ${camera.state.recording ? 'bg-red-400 animate-pulse' : 'bg-emerald-400'}`} />
+                {camera.state.recording ? 'REC' : 'LIVE'}
+              </div>
+            ) : fileName && (
               <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm text-xs text-slate-300 px-2.5 py-1 rounded-md max-w-[50%] min-w-0 truncate pointer-events-none">
                 {fileName}
               </div>
@@ -246,7 +276,27 @@ export default function VideoPlayer({ label, handle, markupHandle, side, isActiv
             </div>
 
             <div className="mt-1 space-y-0 px-1 shrink-0 flex flex-col items-stretch">
-              {handle.state.mediaType === 'video' ? (
+              {camera.state.active ? (
+                <div className="grid grid-cols-[1fr_auto_1fr] items-center w-full min-h-10">
+                  <div className="flex items-center justify-start min-w-0">
+                    <CameraControls camera={camera} />
+                  </div>
+                  <div className="text-xs text-slate-500 whitespace-nowrap">
+                    {camera.state.width > 0 && camera.state.height > 0
+                      ? `${camera.state.width}×${camera.state.height}`
+                      : 'Live view'}
+                  </div>
+                  <div className="flex items-center justify-end gap-2 min-w-0">
+                    <button onClick={(e) => { e.stopPropagation(); handleSelectFile(); }} className="text-xs text-slate-500 hover:text-slate-300 py-0.5 transition-colors whitespace-nowrap">
+                      Change
+                    </button>
+                    <span className="text-slate-700">|</span>
+                    <button onClick={(e) => { e.stopPropagation(); handleRemove(); }} className="text-xs text-slate-600 hover:text-red-400 py-0.5 transition-colors">
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ) : handle.state.mediaType === 'video' ? (
                 <>
                   <ScrubberWithTrim
                     duration={duration}
@@ -264,7 +314,9 @@ export default function VideoPlayer({ label, handle, markupHandle, side, isActiv
                     <span className="text-slate-500">/ {formatTime(Math.max(0, trimEnd - trimStart))}</span>
                   </div>
                   <div className="grid grid-cols-[1fr_auto_1fr] items-center w-full">
-                    <div />
+                    <div className="flex items-center justify-start min-w-0">
+                      <CameraControls camera={camera} />
+                    </div>
                     <div className="flex items-center justify-center gap-2">
                       <button
                         onPointerDown={(e) => { e.stopPropagation(); repeatBack.onPointerDown(e); }}
@@ -289,7 +341,7 @@ export default function VideoPlayer({ label, handle, markupHandle, side, isActiv
                       </button>
                     </div>
                     <div className="flex items-center justify-end gap-2 min-w-0">
-                      <button onClick={(e) => { e.stopPropagation(); selectFile(); }} className="text-xs text-slate-500 hover:text-slate-300 py-0.5 transition-colors whitespace-nowrap">
+                      <button onClick={(e) => { e.stopPropagation(); handleSelectFile(); }} className="text-xs text-slate-500 hover:text-slate-300 py-0.5 transition-colors whitespace-nowrap">
                         {handle.state.mediaType === 'video' ? 'Change' : 'Change'}
                       </button>
                       <span className="text-slate-700">|</span>
@@ -300,9 +352,10 @@ export default function VideoPlayer({ label, handle, markupHandle, side, isActiv
                   </div>
                 </>
               ) : (
-                <div className="flex items-center justify-end w-full">
+                <div className="flex items-center justify-between w-full">
+                  <CameraControls camera={camera} />
                   <div className="flex items-center gap-2">
-                    <button onClick={(e) => { e.stopPropagation(); selectFile(); }} className="text-xs text-slate-500 hover:text-slate-300 py-0.5 transition-colors">
+                    <button onClick={(e) => { e.stopPropagation(); handleSelectFile(); }} className="text-xs text-slate-500 hover:text-slate-300 py-0.5 transition-colors">
                       Change image
                     </button>
                     <span className="text-slate-700">|</span>
@@ -312,6 +365,9 @@ export default function VideoPlayer({ label, handle, markupHandle, side, isActiv
                   </div>
                 </div>
               )}
+              {camera.state.error && (
+                <div className="text-[11px] text-amber-400 text-left py-0.5">{camera.state.error}</div>
+              )}
             </div>
           </div>
 
@@ -320,7 +376,7 @@ export default function VideoPlayer({ label, handle, markupHandle, side, isActiv
       ) : (
         <div
           className={`relative flex-1 min-h-0 flex flex-col items-center justify-center border-2 border-dashed rounded-lg transition-colors bg-black cursor-pointer ${dragOver ? 'border-blue-400 ring-2 ring-blue-400/50' : 'border-slate-600 hover:border-blue-400'}`}
-          onClick={(e) => { e.stopPropagation(); selectFile(); }}
+          onClick={(e) => { e.stopPropagation(); handleSelectFile(); }}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
@@ -328,7 +384,16 @@ export default function VideoPlayer({ label, handle, markupHandle, side, isActiv
           <svg className="w-12 h-12 text-slate-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h1.5C5.496 19.5 6 18.996 6 18.375m-2.625 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-1.5A1.125 1.125 0 0 1 18 18.375M20.625 4.5H3.375m17.25 0c.621 0 1.125.504 1.125 1.125M20.625 4.5h-1.5C18.504 4.5 18 5.004 18 5.625m3.75 0v1.5c0 .621-.504 1.125-1.125 1.125M3.375 4.5c-.621 0-1.125.504-1.125 1.125M3.375 4.5h1.5C5.496 4.5 6 5.004 6 5.625m-3.75 0v1.5c0 .621.504 1.125 1.125 1.125m0 0h1.5m-1.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m1.5-3.75C5.496 8.25 6 7.746 6 7.125v-1.5M4.875 8.25C5.496 8.25 6 8.754 6 9.375v1.5m0-5.25v5.25m0-5.25C6 5.004 6.504 4.5 7.125 4.5h9.75c.621 0 1.125.504 1.125 1.125m1.125 2.625h1.5m-1.5 0A1.125 1.125 0 0 1 18 7.125v-1.5m1.125 2.625c-.621 0-1.125.504-1.125 1.125v1.5m2.625-2.625c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125M18 5.625v5.25M7.125 12h9.75m-9.75 0A1.125 1.125 0 0 1 6 10.875M7.125 12C6.504 12 6 12.504 6 13.125m0-2.25C6 11.496 5.496 12 4.875 12M18 10.875c0 .621-.504 1.125-1.125 1.125M18 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m-12 5.25v-5.25m0 5.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125m-12 0v-1.5c0-.621-.504-1.125-1.125-1.125M18 18.375v-5.25m0 5.25v-1.5c0-.621.504-1.125 1.125-1.125M18 13.125v1.5c0 .621.504 1.125 1.125 1.125M18 13.125c0-.621.504-1.125 1.125-1.125M6 13.125v1.5c0 .621-.504 1.125-1.125 1.125M6 13.125C6 12.504 5.496 12 4.875 12m-1.5 0h1.5m-1.5 0c-.621 0-1.125-.504-1.125-1.125v-1.5c0-.621.504-1.125 1.125-1.125m1.5 3.75c-.621 0-1.125-.504-1.125-1.125v-1.5c0-.621.504-1.125 1.125-1.125" />
           </svg>
-          <span className="text-slate-400 text-sm font-medium">{dragOver ? 'Drop video here' : `Click or drag and drop a video / image`}</span>
+          <span className="text-slate-400 text-sm font-medium">{dragOver ? 'Drop video here' : 'Click or drag and drop a video / image'}</span>
+          {!dragOver && (
+            <div className="mt-3 flex items-center gap-3">
+              <span className="text-xs text-slate-600">or</span>
+              <CameraControls camera={camera} />
+            </div>
+          )}
+          {camera.state.error && (
+            <span className="mt-3 max-w-sm px-4 text-center text-xs text-amber-400">{camera.state.error}</span>
+          )}
         </div>
       )}
     </div>

@@ -3,6 +3,7 @@ import VideoPlayer from './components/VideoPlayer';
 import OverlayView from './components/OverlayView';
 import { useVideoPlayer } from './hooks/useVideoPlayer';
 import type { VideoTransform, ImageAdjust } from './hooks/useVideoPlayer';
+import { useCameraCapture } from './hooks/useCameraCapture';
 import { useMarkup, type GridSettings } from './hooks/useMarkup';
 import { getPersistedVideos, setPersistedVideo, removePersistedVideo } from './lib/persistence';
 import { isMediaFile } from './lib/videoFile';
@@ -33,6 +34,8 @@ export default function App() {
 
   const handle1 = useVideoPlayer();
   const handle2 = useVideoPlayer();
+  const camera1 = useCameraCapture('Video 1', (file) => handle1.loadFromPersisted(file, file.name));
+  const camera2 = useCameraCapture('Video 2', (file) => handle2.loadFromPersisted(file, file.name));
   const markup1 = useMarkup();
   const markup2 = useMarkup();
 
@@ -131,13 +134,15 @@ export default function App() {
   const handleOverlayDropFile = useCallback((file: File, target: 1 | 2) => {
     if (!isMediaFile(file)) return;
     if (target === 1) {
+      camera1.stopCamera();
       handle1.loadFromPersisted(file, file.name);
       markup1.loadSnap({ lines: [], angles: [], texts: [], grid: markup1.state.grid, hidden: markup1.state.hidden });
     } else {
+      camera2.stopCamera();
       handle2.loadFromPersisted(file, file.name);
       markup2.loadSnap({ lines: [], angles: [], texts: [], grid: markup2.state.grid, hidden: markup2.state.hidden });
     }
-  }, [handle1, handle2, markup1, markup2]);
+  }, [handle1, handle2, camera1, camera2, markup1, markup2]);
 
   // Load persisted videos and markup on mount
   useEffect(() => {
@@ -575,12 +580,13 @@ export default function App() {
               <VideoPlayer
                 label="Video 1"
                 handle={handle1}
+                camera={camera1}
                 markupHandle={markup1}
                 side="left"
                 isActive={activeVideo === 1}
                 onActivate={() => setActiveVideo(1)}
                 onRemoveVideo={removeVideo1}
-                onDropFile={(file) => { handle1.loadFromPersisted(file, file.name); }}
+                onDropFile={(file) => { camera1.stopCamera(); handle1.loadFromPersisted(file, file.name); }}
                 onTransformChange={setTransform1}
                 onTransformReset={resetTransform1}
                 syncTransform={syncTransform}
@@ -596,12 +602,13 @@ export default function App() {
               <VideoPlayer
                 label="Video 2"
                 handle={handle2}
+                camera={camera2}
                 markupHandle={markup2}
                 side="right"
                 isActive={activeVideo === 2}
                 onActivate={() => setActiveVideo(2)}
                 onRemoveVideo={removeVideo2}
-                onDropFile={(file) => { handle2.loadFromPersisted(file, file.name); }}
+                onDropFile={(file) => { camera2.stopCamera(); handle2.loadFromPersisted(file, file.name); }}
                 onTransformChange={setTransform2}
                 onTransformReset={resetTransform2}
                 syncTransform={syncTransform}
@@ -620,6 +627,8 @@ export default function App() {
               <OverlayView
                 handle1={handle1}
                 handle2={handle2}
+                camera1={camera1}
+                camera2={camera2}
                 markupHandle1={markup1}
                 markupHandle2={markup2}
                 activeVideo={activeVideo}
