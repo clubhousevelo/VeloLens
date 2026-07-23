@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+export interface CameraDeviceOption {
+  deviceId: string;
+  label: string;
+}
+
 export interface CameraCaptureState {
   active: boolean;
   recording: boolean;
@@ -7,12 +12,15 @@ export interface CameraCaptureState {
   width: number;
   height: number;
   error: string | null;
+  devices: CameraDeviceOption[];
+  selectedDeviceId: string;
 }
 
 export interface CameraCaptureHandle {
   state: CameraCaptureState;
   videoRef: React.RefCallback<HTMLVideoElement | null>;
-  startCamera: () => Promise<void>;
+  startCamera: (deviceId?: string) => Promise<void>;
+  selectCamera: (deviceId: string) => Promise<void>;
   stopCamera: () => void;
   startRecording: () => void;
   stopRecording: () => void;
@@ -25,7 +33,24 @@ const INITIAL_STATE: CameraCaptureState = {
   width: 0,
   height: 0,
   error: null,
+  devices: [],
+  selectedDeviceId: '',
 };
+
+async function getCameraDevices(): Promise<CameraDeviceOption[]> {
+  if (!navigator.mediaDevices?.enumerateDevices) return [];
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const videoInputs = devices.filter((device) => device.kind === 'videoinput');
+  const identifiedInputs = videoInputs.filter((device) => device.deviceId);
+  if (identifiedInputs.length === 0 && videoInputs.length > 0) {
+    return [{ deviceId: '', label: 'Default camera' }];
+  }
+  return identifiedInputs
+    .map((device, index) => ({
+      deviceId: device.deviceId,
+      label: device.label || `Camera ${index + 1}`,
+    }));
+}
 
 function recordingType(): { mimeType: string; extension: string } {
   if (typeof MediaRecorder === 'undefined') {
@@ -61,6 +86,8 @@ export function useCameraCapture(
   onRecordingComplete: (file: File) => void,
 ): CameraCaptureHandle {
   const [state, setState] = useState(INITIAL_STATE);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const streamRef = useRef<MediaStream | null>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -87,10 +114,35 @@ export function useCameraCapture(
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     if (videoElRef.current) videoElRef.current.srcObject = null;
-    setState(INITIAL_STATE);
+    setState((previous) => ({
+      ...INITIAL_STATE,
+      devices: previous.devices,
+      selectedDeviceId: previous.selectedDeviceId,
+    }));
   }, [stopRecording]);
 
-  const startCamera = useCallback(async () => {
+  const refreshCameras = useCallback(async () => {
+    try {
+      const devices = await getCameraDevices();
+      setState((previous) => {
+        const selectionStillExists = devices.some(
+          (device) => device.deviceId === previous.selectedDeviceId,
+        );
+        return {
+          ...previous,
+          devices,
+          selectedDeviceId: selectionStillExists
+            ? previous.selectedDeviceId
+            : (devices[0]?.deviceId ?? ''),
+        };
+      });
+      return devices;
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const startCamera = useCallback(async (deviceId?: string) => {
     if (!navigator.mediaDevices?.getUserMedia) {
       setState((previous) => ({
         ...previous,
@@ -99,6 +151,7 @@ export function useCameraCapture(
       return;
     }
 
+    const requestedDeviceId = deviceId ?? stateRef.current.selectedDeviceId;
     stopCamera();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -107,10 +160,16 @@ export function useCameraCapture(
           width: { ideal: 1920 },
           height: { ideal: 1080 },
           frameRate: { ideal: 60, max: 60 },
+          ...(requestedDeviceId ? { deviceId: { exact: requestedDeviceId } } : {}),
         },
       });
       streamRef.current = stream;
       const settings = stream.getVideoTracks()[0]?.getSettings();
+      const devices = await getCameraDevices().catch(() => stateRef.current.devices);
+      const selectedDeviceId = settings?.deviceId
+        ?? requestedDeviceId
+        ?? devices[0]?.deviceId
+        ?? '';
       setState({
         active: true,
         recording: false,
@@ -118,6 +177,8 @@ export function useCameraCapture(
         width: settings?.width ?? 0,
         height: settings?.height ?? 0,
         error: null,
+        devices,
+        selectedDeviceId,
       });
       if (videoElRef.current) {
         videoElRef.current.srcObject = stream;
@@ -128,6 +189,13 @@ export function useCameraCapture(
       setState((previous) => ({ ...previous, error: cameraErrorMessage(error) }));
     }
   }, [stopCamera]);
+
+  const selectCamera = useCallback(async (deviceId: string) => {
+    if (!deviceId || deviceId === stateRef.current.selectedDeviceId) return;
+    const wasActive = stateRef.current.active;
+    setState((previous) => ({ ...previous, selectedDeviceId: deviceId, error: null }));
+    if (wasActive) await startCamera(deviceId);
+  }, [startCamera]);
 
   const startRecording = useCallback(() => {
     const stream = streamRef.current;
@@ -192,12 +260,22 @@ export function useCameraCapture(
     }
   }, [panelName]);
 
-  useEffect(() => stopCamera, [stopCamera]);
+  useEffect(() => {
+    const mediaDevices = navigator.mediaDevices;
+    void refreshCameras();
+    const handleDeviceChange = () => { void refreshCameras(); };
+    mediaDevices?.addEventListener('devicechange', handleDeviceChange);
+    return () => {
+      mediaDevices?.removeEventListener('devicechange', handleDeviceChange);
+      stopCamera();
+    };
+  }, [refreshCameras, stopCamera]);
 
   return {
     state,
     videoRef: attachStream,
     startCamera,
+    selectCamera,
     stopCamera,
     startRecording,
     stopRecording,

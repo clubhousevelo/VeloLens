@@ -9,24 +9,48 @@ export default function CameraControls({
 }) {
   const textSize = compact ? 'text-[11px]' : 'text-xs';
   const fps = camera.state.frameRate ? Math.round(camera.state.frameRate) : null;
+  const showDeviceSelector = camera.state.devices.length > 1;
+
+  const deviceSelector = showDeviceSelector ? (
+    <select
+      value={camera.state.selectedDeviceId}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => {
+        event.stopPropagation();
+        void camera.selectCamera(event.target.value);
+      }}
+      disabled={camera.state.recording}
+      className={`${textSize} max-w-36 min-w-0 bg-slate-800 border border-slate-700 text-slate-300 rounded px-1.5 py-1 outline-none hover:border-slate-500 focus:border-blue-500 disabled:opacity-50`}
+      title={camera.state.recording ? 'Stop recording before switching cameras' : 'Choose camera'}
+      aria-label="Choose camera"
+    >
+      {camera.state.devices.map((device) => (
+        <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+      ))}
+    </select>
+  ) : null;
 
   if (!camera.state.active) {
     return (
-      <button
-        onClick={(event) => {
-          event.stopPropagation();
-          void camera.startCamera();
-        }}
-        className={`${textSize} text-blue-400 hover:text-blue-300 py-0.5 transition-colors whitespace-nowrap`}
-        title="Show a live view from an attached camera"
-      >
-        Live camera
-      </button>
+      <div className="flex items-center justify-center gap-2 min-w-0">
+        {deviceSelector}
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            void camera.startCamera();
+          }}
+          className={`${textSize} text-blue-400 hover:text-blue-300 py-0.5 transition-colors whitespace-nowrap`}
+          title="Show a live view from the selected camera"
+        >
+          Live camera
+        </button>
+      </div>
     );
   }
 
   return (
     <div className={`flex items-center gap-2 min-w-0 ${textSize}`}>
+      {deviceSelector}
       <button
         onClick={(event) => {
           event.stopPropagation();

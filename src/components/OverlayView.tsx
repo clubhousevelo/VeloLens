@@ -54,12 +54,9 @@ function VideoControls({
           >
             Select video or image
           </button>
-          <button
-            onClick={() => void camera.startCamera()}
-            className="py-3 border border-dashed border-slate-600 rounded-lg text-blue-400 text-sm hover:border-blue-400 hover:text-blue-300 transition-colors"
-          >
-            Live camera
-          </button>
+          <div className="flex items-center justify-center py-3 border border-dashed border-slate-600 rounded-lg hover:border-blue-400 transition-colors">
+            <CameraControls camera={camera} compact />
+          </div>
         </div>
         {camera.state.error && <div className="text-[11px] text-amber-400">{camera.state.error}</div>}
       </div>
