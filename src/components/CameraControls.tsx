@@ -53,7 +53,7 @@ export default function CameraControls({
 
   if (!camera.state.active) {
     return (
-      <div className="flex items-center justify-center gap-2 min-w-0">
+      <div className="flex flex-wrap items-center justify-center gap-2 min-w-0">
         {deviceSelector}
         {formatSelector}
         <button
@@ -71,8 +71,8 @@ export default function CameraControls({
   }
 
   return (
-    <div className={`flex flex-col items-start gap-0.5 min-w-0 ${textSize}`}>
-      <div className="flex items-center gap-2 min-w-0">
+    <div className={`flex flex-col items-start gap-0.5 min-w-0 w-full ${textSize}`}>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0 w-full">
         {deviceSelector}
         {formatSelector}
         <button
@@ -91,7 +91,7 @@ export default function CameraControls({
             if (camera.state.recording) camera.stopRecording();
             else camera.startRecording();
           }}
-          className={`flex items-center gap-1 py-0.5 font-medium transition-colors whitespace-nowrap ${
+          className={`relative z-10 flex items-center gap-1 py-0.5 font-medium transition-colors whitespace-nowrap ${
             camera.state.recording ? 'text-red-400 hover:text-red-300' : 'text-emerald-400 hover:text-emerald-300'
           }`}
         >
@@ -110,7 +110,7 @@ export default function CameraControls({
         )}
       </div>
       {camera.state.qualityWarning && (
-        <span className="text-amber-400 whitespace-nowrap">{camera.state.qualityWarning}</span>
+        <span className="text-amber-400 whitespace-normal leading-tight pointer-events-none">{camera.state.qualityWarning}</span>
       )}
     </div>
   );

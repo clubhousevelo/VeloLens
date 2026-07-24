@@ -75,9 +75,9 @@ function VideoControls({
         </div>
       </div>
       {camera.state.active && (
-        <div className="grid grid-cols-[1fr_auto] items-center min-h-10">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 min-h-10">
           <CameraControls camera={camera} compact />
-          <div className="flex items-center gap-1 min-w-0 justify-end">
+          <div className="relative z-10 flex items-center gap-1 min-w-0 justify-end pt-1">
             <button onClick={handleSelectFile} className="text-[11px] text-slate-500 hover:text-slate-300 py-0.5 transition-colors">
               Change
             </button>

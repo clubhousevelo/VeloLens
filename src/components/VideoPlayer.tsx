@@ -278,14 +278,11 @@ export default function VideoPlayer({ label, handle, camera, markupHandle, side,
 
             <div className="mt-1 space-y-0 px-1 shrink-0 flex flex-col items-stretch">
               {camera.state.active ? (
-                <div className="grid grid-cols-[1fr_auto_1fr] items-center w-full min-h-10">
-                  <div className="flex items-center justify-start min-w-0">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-0.5 w-full min-h-10">
+                  <div className="flex items-start justify-start min-w-0">
                     <CameraControls camera={camera} />
                   </div>
-                  <div className="text-xs text-slate-500 whitespace-nowrap">
-                    {camera.state.qualityLabel || 'Live view'}
-                  </div>
-                  <div className="flex items-center justify-end gap-2 min-w-0">
+                  <div className="relative z-10 flex items-center justify-end gap-2 min-w-0 pt-1">
                     <button onClick={(e) => { e.stopPropagation(); handleSelectFile(); }} className="text-xs text-slate-500 hover:text-slate-300 py-0.5 transition-colors whitespace-nowrap">
                       Change
                     </button>
@@ -293,6 +290,9 @@ export default function VideoPlayer({ label, handle, camera, markupHandle, side,
                     <button onClick={(e) => { e.stopPropagation(); handleRemove(); }} className="text-xs text-slate-600 hover:text-red-400 py-0.5 transition-colors">
                       Remove
                     </button>
+                  </div>
+                  <div className="col-start-1 text-xs text-slate-500 whitespace-normal leading-tight pointer-events-none">
+                    {camera.state.qualityLabel || 'Live view'}
                   </div>
                 </div>
               ) : handle.state.mediaType === 'video' ? (
