@@ -170,19 +170,69 @@ export function useVideoPlayer(): VideoPlayerHandle {
     // leaving state stuck at isPlaying: true. The new element mounts paused, so we sync.
     setState((prev) => (prev.isPlaying !== !videoEl.paused ? { ...prev, isPlaying: !videoEl.paused } : prev));
 
-    const onLoaded = () => {
-      const dur = videoEl.duration;
-      const st = stateRef.current;
+    let durationProbeRestoreTime: number | null = null;
+
+    const applyFiniteDuration = (dur: number) => {
+      if (!Number.isFinite(dur) || dur <= 0) return false;
+      const restoreTime = durationProbeRestoreTime ?? stateRef.current.currentTime;
+      durationProbeRestoreTime = null;
+      const safeTime = Number.isFinite(restoreTime)
+        ? Math.max(0, Math.min(restoreTime, dur))
+        : 0;
       setState((prev) => ({
         ...prev,
         duration: dur,
         videoWidth: videoEl.videoWidth,
         videoHeight: videoEl.videoHeight,
-        trimEnd: prev.trimEnd === 0 || prev.trimEnd > dur ? dur : prev.trimEnd,
+        currentTime: safeTime,
+        trimStart: Number.isFinite(prev.trimStart) ? Math.min(prev.trimStart, dur) : 0,
+        trimEnd: !Number.isFinite(prev.trimEnd) || prev.trimEnd <= 0 || prev.trimEnd > dur
+          ? dur
+          : prev.trimEnd,
       }));
+      if (Math.abs(videoEl.currentTime - safeTime) > 0.001) {
+        videoEl.currentTime = safeTime;
+      }
+      return true;
+    };
+
+    const tryResolveDuration = () => {
+      if (applyFiniteDuration(videoEl.duration)) return;
+      if (videoEl.seekable.length > 0) {
+        const seekableEnd = videoEl.seekable.end(videoEl.seekable.length - 1);
+        if (applyFiniteDuration(seekableEnd)) return;
+      }
+      if (
+        durationProbeRestoreTime !== null
+        && Number.isFinite(videoEl.currentTime)
+        && videoEl.currentTime > 0
+        && videoEl.currentTime < 1_000_000_000
+      ) {
+        applyFiniteDuration(videoEl.currentTime);
+      }
+    };
+
+    const onLoaded = () => {
+      const st = stateRef.current;
       videoEl.playbackRate = st.playbackRate;
-      if (st.currentTime > 0 && st.currentTime <= dur) {
-        videoEl.currentTime = st.currentTime;
+      if (applyFiniteDuration(videoEl.duration)) return;
+
+      // MediaRecorder WebM files can omit duration metadata and appear as live
+      // streams. Seeking far beyond the end makes browsers expose the real end.
+      durationProbeRestoreTime = Number.isFinite(st.currentTime) ? st.currentTime : 0;
+      setState((prev) => ({
+        ...prev,
+        duration: 0,
+        videoWidth: videoEl.videoWidth,
+        videoHeight: videoEl.videoHeight,
+        currentTime: 0,
+        trimStart: Number.isFinite(prev.trimStart) ? prev.trimStart : 0,
+        trimEnd: 0,
+      }));
+      try {
+        videoEl.currentTime = Number.MAX_SAFE_INTEGER;
+      } catch {
+        durationProbeRestoreTime = null;
       }
     };
 
@@ -205,19 +255,23 @@ export function useVideoPlayer(): VideoPlayerHandle {
     };
 
     videoEl.addEventListener('loadedmetadata', onLoaded);
+    videoEl.addEventListener('durationchange', tryResolveDuration);
+    videoEl.addEventListener('progress', tryResolveDuration);
+    videoEl.addEventListener('seeked', tryResolveDuration);
     videoEl.addEventListener('play', onPlay);
     videoEl.addEventListener('pause', onPause);
     videoEl.addEventListener('ended', onEnded);
 
     // If the element already has metadata (remount with same blob URL), apply state now.
     if (videoEl.readyState >= 1) {
-      const st = stateRef.current;
-      videoEl.playbackRate = st.playbackRate;
-      if (st.currentTime > 0) videoEl.currentTime = st.currentTime;
+      onLoaded();
     }
 
     return () => {
       videoEl.removeEventListener('loadedmetadata', onLoaded);
+      videoEl.removeEventListener('durationchange', tryResolveDuration);
+      videoEl.removeEventListener('progress', tryResolveDuration);
+      videoEl.removeEventListener('seeked', tryResolveDuration);
       videoEl.removeEventListener('play', onPlay);
       videoEl.removeEventListener('pause', onPause);
       videoEl.removeEventListener('ended', onEnded);
@@ -280,9 +334,9 @@ export function useVideoPlayer(): VideoPlayerHandle {
     } else {
       const base = { ...INITIAL_STATE, src: url, fileName, playbackRate: rate };
       if (meta) {
-        if (meta.trimStart != null) base.trimStart = meta.trimStart;
-        if (meta.trimEnd != null) base.trimEnd = meta.trimEnd;
-        if (meta.currentTime != null) base.currentTime = meta.currentTime;
+        if (meta.trimStart != null && Number.isFinite(meta.trimStart)) base.trimStart = meta.trimStart;
+        if (meta.trimEnd != null && Number.isFinite(meta.trimEnd)) base.trimEnd = meta.trimEnd;
+        if (meta.currentTime != null && Number.isFinite(meta.currentTime)) base.currentTime = meta.currentTime;
         if (meta.playbackRate != null) base.playbackRate = meta.playbackRate;
         if (meta.volume != null) base.volume = meta.volume;
         if (meta.muted != null) base.muted = meta.muted;

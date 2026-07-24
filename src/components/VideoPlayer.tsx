@@ -44,6 +44,7 @@ interface VideoPlayerProps {
 }
 
 function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00.0';
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   const ms = Math.floor((seconds % 1) * 10);
@@ -282,9 +283,7 @@ export default function VideoPlayer({ label, handle, camera, markupHandle, side,
                     <CameraControls camera={camera} />
                   </div>
                   <div className="text-xs text-slate-500 whitespace-nowrap">
-                    {camera.state.width > 0 && camera.state.height > 0
-                      ? `${camera.state.width}×${camera.state.height}`
-                      : 'Live view'}
+                    {camera.state.qualityLabel || 'Live view'}
                   </div>
                   <div className="flex items-center justify-end gap-2 min-w-0">
                     <button onClick={(e) => { e.stopPropagation(); handleSelectFile(); }} className="text-xs text-slate-500 hover:text-slate-300 py-0.5 transition-colors whitespace-nowrap">

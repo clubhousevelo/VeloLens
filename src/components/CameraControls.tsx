@@ -10,6 +10,8 @@ export default function CameraControls({
   const textSize = compact ? 'text-[11px]' : 'text-xs';
   const fps = camera.state.frameRate ? Math.round(camera.state.frameRate) : null;
   const showDeviceSelector = camera.state.devices.length > 1;
+  const mp4Supported = camera.state.supportedContainers.includes('mp4');
+  const webmSupported = camera.state.supportedContainers.includes('webm');
 
   const deviceSelector = showDeviceSelector ? (
     <select
@@ -30,10 +32,30 @@ export default function CameraControls({
     </select>
   ) : null;
 
+  const formatSelector = (
+    <select
+      value={camera.state.recordingContainer}
+      onClick={(event) => event.stopPropagation()}
+      onChange={(event) => {
+        event.stopPropagation();
+        camera.setRecordingContainer(event.target.value as 'auto' | 'mp4' | 'webm');
+      }}
+      disabled={camera.state.recording}
+      className={`${textSize} max-w-28 min-w-0 bg-slate-800 border border-slate-700 text-slate-300 rounded px-1.5 py-1 outline-none hover:border-slate-500 focus:border-blue-500 disabled:opacity-50`}
+      title="Recording format"
+      aria-label="Recording format"
+    >
+      <option value="auto">Auto ({mp4Supported ? 'MP4' : 'WebM'})</option>
+      <option value="mp4" disabled={!mp4Supported}>MP4</option>
+      <option value="webm" disabled={!webmSupported}>WebM</option>
+    </select>
+  );
+
   if (!camera.state.active) {
     return (
       <div className="flex items-center justify-center gap-2 min-w-0">
         {deviceSelector}
+        {formatSelector}
         <button
           onClick={(event) => {
             event.stopPropagation();
@@ -49,38 +71,46 @@ export default function CameraControls({
   }
 
   return (
-    <div className={`flex items-center gap-2 min-w-0 ${textSize}`}>
-      {deviceSelector}
-      <button
-        onClick={(event) => {
-          event.stopPropagation();
-          camera.stopCamera();
-        }}
-        className="text-slate-500 hover:text-slate-300 py-0.5 transition-colors whitespace-nowrap"
-      >
-        Stop camera
-      </button>
-      <span className="text-slate-700">|</span>
-      <button
-        onClick={(event) => {
-          event.stopPropagation();
-          if (camera.state.recording) camera.stopRecording();
-          else camera.startRecording();
-        }}
-        className={`flex items-center gap-1 py-0.5 font-medium transition-colors whitespace-nowrap ${
-          camera.state.recording ? 'text-red-400 hover:text-red-300' : 'text-emerald-400 hover:text-emerald-300'
-        }`}
-      >
-        <span className={`inline-block w-2 h-2 ${camera.state.recording ? 'rounded-sm bg-red-400' : 'rounded-full bg-red-500'}`} />
-        {camera.state.recording ? 'Stop & save' : 'Record'}
-      </button>
-      {fps && (
-        <span
-          className="text-slate-600 whitespace-nowrap"
-          title={fps >= 59 ? 'Camera is providing approximately 60 fps' : 'Camera or browser frame-rate limit'}
+    <div className={`flex flex-col items-start gap-0.5 min-w-0 ${textSize}`}>
+      <div className="flex items-center gap-2 min-w-0">
+        {deviceSelector}
+        {formatSelector}
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            camera.stopCamera();
+          }}
+          className="text-slate-500 hover:text-slate-300 py-0.5 transition-colors whitespace-nowrap"
         >
-          {fps} fps
-        </span>
+          Stop camera
+        </button>
+        <span className="text-slate-700">|</span>
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            if (camera.state.recording) camera.stopRecording();
+            else camera.startRecording();
+          }}
+          className={`flex items-center gap-1 py-0.5 font-medium transition-colors whitespace-nowrap ${
+            camera.state.recording ? 'text-red-400 hover:text-red-300' : 'text-emerald-400 hover:text-emerald-300'
+          }`}
+        >
+          <span className={`inline-block w-2 h-2 ${camera.state.recording ? 'rounded-sm bg-red-400' : 'rounded-full bg-red-500'}`} />
+          {camera.state.recording
+            ? `Stop & save ${camera.state.activeRecordingContainer?.toUpperCase() ?? ''}`
+            : 'Record'}
+        </button>
+        {fps && (
+          <span
+            className={`${fps >= 59 ? 'text-slate-600' : 'text-amber-400'} whitespace-nowrap`}
+            title={fps >= 59 ? 'Camera is providing approximately 60 fps' : 'Camera or browser frame-rate limit'}
+          >
+            {fps} fps
+          </span>
+        )}
+      </div>
+      {camera.state.qualityWarning && (
+        <span className="text-amber-400 whitespace-nowrap">{camera.state.qualityWarning}</span>
       )}
     </div>
   );

@@ -18,6 +18,7 @@ import type { CameraCaptureHandle } from '../hooks/useCameraCapture';
 import CameraControls from './CameraControls';
 
 function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00.0';
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   const ms = Math.floor((seconds % 1) * 10);

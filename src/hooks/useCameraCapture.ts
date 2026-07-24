@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import fixWebmDuration from 'fix-webm-duration';
 
 export interface CameraDeviceOption {
   deviceId: string;
   label: string;
 }
+
+export type RecordingContainer = 'auto' | 'mp4' | 'webm';
 
 export interface CameraCaptureState {
   active: boolean;
@@ -14,6 +17,11 @@ export interface CameraCaptureState {
   error: string | null;
   devices: CameraDeviceOption[];
   selectedDeviceId: string;
+  qualityLabel: string;
+  qualityWarning: string | null;
+  recordingContainer: RecordingContainer;
+  supportedContainers: Exclude<RecordingContainer, 'auto'>[];
+  activeRecordingContainer: Exclude<RecordingContainer, 'auto'> | null;
 }
 
 export interface CameraCaptureHandle {
@@ -21,6 +29,7 @@ export interface CameraCaptureHandle {
   videoRef: React.RefCallback<HTMLVideoElement | null>;
   startCamera: (deviceId?: string) => Promise<void>;
   selectCamera: (deviceId: string) => Promise<void>;
+  setRecordingContainer: (container: RecordingContainer) => void;
   stopCamera: () => void;
   startRecording: () => void;
   stopRecording: () => void;
@@ -35,7 +44,52 @@ const INITIAL_STATE: CameraCaptureState = {
   error: null,
   devices: [],
   selectedDeviceId: '',
+  qualityLabel: '',
+  qualityWarning: null,
+  recordingContainer: 'auto',
+  supportedContainers: [],
+  activeRecordingContainer: null,
 };
+
+interface CaptureProfile {
+  label: string;
+  constraints: MediaTrackConstraints;
+}
+
+const CAPTURE_PROFILES: CaptureProfile[] = [
+  {
+    label: '1080p60',
+    constraints: {
+      width: { exact: 1920 },
+      height: { exact: 1080 },
+      frameRate: { min: 59, ideal: 60, max: 60 },
+    },
+  },
+  {
+    label: '720p60',
+    constraints: {
+      width: { exact: 1280 },
+      height: { exact: 720 },
+      frameRate: { min: 59, ideal: 60, max: 60 },
+    },
+  },
+  {
+    label: '1080p30',
+    constraints: {
+      width: { exact: 1920 },
+      height: { exact: 1080 },
+      frameRate: { min: 29, ideal: 30, max: 30 },
+    },
+  },
+  {
+    label: 'Best available',
+    constraints: {
+      width: { ideal: 1920 },
+      height: { ideal: 1080 },
+      frameRate: { ideal: 60, max: 60 },
+    },
+  },
+];
 
 async function getCameraDevices(): Promise<CameraDeviceOption[]> {
   if (!navigator.mediaDevices?.enumerateDevices) return [];
@@ -52,19 +106,76 @@ async function getCameraDevices(): Promise<CameraDeviceOption[]> {
     }));
 }
 
-function recordingType(): { mimeType: string; extension: string } {
+function supportedRecordingContainers(): Exclude<RecordingContainer, 'auto'>[] {
+  if (typeof MediaRecorder === 'undefined') return [];
+  const containers: Exclude<RecordingContainer, 'auto'>[] = [];
+  if ([
+    'video/mp4;codecs=avc1.42E01E',
+    'video/mp4;codecs=avc1',
+    'video/mp4;codecs=h264',
+    'video/mp4',
+  ].some((mimeType) => MediaRecorder.isTypeSupported(mimeType))) {
+    containers.push('mp4');
+  }
+  if ([
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm',
+  ].some((mimeType) => MediaRecorder.isTypeSupported(mimeType))) {
+    containers.push('webm');
+  }
+  return containers;
+}
+
+function recordingType(preference: RecordingContainer): { mimeType: string; extension: 'mp4' | 'webm' } {
   if (typeof MediaRecorder === 'undefined') {
     return { mimeType: '', extension: 'webm' };
   }
-  const candidates = [
-    { mimeType: 'video/webm;codecs=vp9', extension: 'webm' },
-    { mimeType: 'video/webm;codecs=vp8', extension: 'webm' },
-    { mimeType: 'video/mp4;codecs=h264', extension: 'mp4' },
-    { mimeType: 'video/mp4', extension: 'mp4' },
-    { mimeType: 'video/webm', extension: 'webm' },
+  const mp4Candidates = [
+    { mimeType: 'video/mp4;codecs=avc1.42E01E', extension: 'mp4' as const },
+    { mimeType: 'video/mp4;codecs=avc1', extension: 'mp4' as const },
+    { mimeType: 'video/mp4;codecs=h264', extension: 'mp4' as const },
+    { mimeType: 'video/mp4', extension: 'mp4' as const },
   ];
+  const webmCandidates = [
+    { mimeType: 'video/webm;codecs=vp9', extension: 'webm' as const },
+    { mimeType: 'video/webm;codecs=vp8', extension: 'webm' as const },
+    { mimeType: 'video/webm', extension: 'webm' as const },
+  ];
+  const candidates = preference === 'webm'
+    ? [...webmCandidates, ...mp4Candidates]
+    : [...mp4Candidates, ...webmCandidates];
   return candidates.find(({ mimeType }) => MediaRecorder.isTypeSupported(mimeType))
     ?? { mimeType: '', extension: 'webm' };
+}
+
+async function openBestCameraStream(deviceId: string): Promise<{ stream: MediaStream; profile: CaptureProfile }> {
+  let lastError: unknown;
+  for (const profile of CAPTURE_PROFILES) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          ...profile.constraints,
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+        },
+      });
+      return { stream, profile };
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof DOMException) || error.name !== 'OverconstrainedError') throw error;
+    }
+  }
+  throw lastError;
+}
+
+function actualQualityLabel(settings: MediaTrackSettings): string {
+  const resolution = settings.width && settings.height
+    ? `${settings.width}×${settings.height}`
+    : 'Camera';
+  return settings.frameRate
+    ? `${resolution} @ ${Math.round(settings.frameRate)} fps`
+    : resolution;
 }
 
 function cameraErrorMessage(error: unknown): string {
@@ -85,14 +196,18 @@ export function useCameraCapture(
   panelName: string,
   onRecordingComplete: (file: File) => void,
 ): CameraCaptureHandle {
-  const [state, setState] = useState(INITIAL_STATE);
+  const [state, setState] = useState<CameraCaptureState>(() => ({
+    ...INITIAL_STATE,
+    supportedContainers: supportedRecordingContainers(),
+  }));
   const stateRef = useRef(state);
   stateRef.current = state;
   const streamRef = useRef<MediaStream | null>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const recordingFormatRef = useRef(recordingType());
+  const recordingFormatRef = useRef(recordingType('auto'));
+  const recordingStartedAtRef = useRef(0);
   const onRecordingCompleteRef = useRef(onRecordingComplete);
   onRecordingCompleteRef.current = onRecordingComplete;
 
@@ -118,6 +233,8 @@ export function useCameraCapture(
       ...INITIAL_STATE,
       devices: previous.devices,
       selectedDeviceId: previous.selectedDeviceId,
+      recordingContainer: previous.recordingContainer,
+      supportedContainers: previous.supportedContainers,
     }));
   }, [stopRecording]);
 
@@ -154,17 +271,9 @@ export function useCameraCapture(
     const requestedDeviceId = deviceId ?? stateRef.current.selectedDeviceId;
     stopCamera();
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 60, max: 60 },
-          ...(requestedDeviceId ? { deviceId: { exact: requestedDeviceId } } : {}),
-        },
-      });
+      const { stream, profile } = await openBestCameraStream(requestedDeviceId);
       streamRef.current = stream;
-      const settings = stream.getVideoTracks()[0]?.getSettings();
+      const settings = stream.getVideoTracks()[0]?.getSettings() ?? {};
       const devices = await getCameraDevices().catch(() => stateRef.current.devices);
       const selectedDeviceId = settings?.deviceId
         ?? requestedDeviceId
@@ -179,6 +288,13 @@ export function useCameraCapture(
         error: null,
         devices,
         selectedDeviceId,
+        qualityLabel: actualQualityLabel(settings),
+        qualityWarning: settings.frameRate != null && settings.frameRate < 59
+          ? `${profile.label} fallback: this camera is providing ${Math.round(settings.frameRate)} fps.`
+          : null,
+        recordingContainer: stateRef.current.recordingContainer,
+        supportedContainers: stateRef.current.supportedContainers,
+        activeRecordingContainer: null,
       });
       if (videoElRef.current) {
         videoElRef.current.srcObject = stream;
@@ -197,6 +313,11 @@ export function useCameraCapture(
     if (wasActive) await startCamera(deviceId);
   }, [startCamera]);
 
+  const setRecordingContainer = useCallback((container: RecordingContainer) => {
+    if (stateRef.current.recording) return;
+    setState((previous) => ({ ...previous, recordingContainer: container }));
+  }, []);
+
   const startRecording = useCallback(() => {
     const stream = streamRef.current;
     if (!stream || typeof MediaRecorder === 'undefined') {
@@ -208,12 +329,12 @@ export function useCameraCapture(
     }
 
     try {
-      const format = recordingType();
+      const format = recordingType(stateRef.current.recordingContainer);
       recordingFormatRef.current = format;
       chunksRef.current = [];
       const recorder = new MediaRecorder(stream, {
         ...(format.mimeType ? { mimeType: format.mimeType } : {}),
-        videoBitsPerSecond: 12_000_000,
+        videoBitsPerSecond: 20_000_000,
       });
       recorderRef.current = recorder;
       recorder.ondataavailable = (event) => {
@@ -226,16 +347,30 @@ export function useCameraCapture(
           error: 'The recording stopped because of a camera error.',
         }));
       };
-      recorder.onstop = () => {
-        const { mimeType, extension } = recordingFormatRef.current;
+      recorder.onstop = async () => {
+        const { mimeType } = recordingFormatRef.current;
         const type = recorder.mimeType || mimeType || 'video/webm';
-        const blob = new Blob(chunksRef.current, { type });
+        const rawBlob = new Blob(chunksRef.current, { type });
+        const durationMs = Math.max(1, performance.now() - recordingStartedAtRef.current);
         chunksRef.current = [];
         recorderRef.current = null;
-        setState((previous) => ({ ...previous, recording: false }));
-        if (blob.size === 0) return;
+        setState((previous) => ({ ...previous, recording: false, activeRecordingContainer: null }));
+        if (rawBlob.size === 0) return;
 
-        const fileName = `VeloLens-${panelName.replace(/\s+/g, '-')}-${timestamp()}.${extension}`;
+        let blob = rawBlob;
+        const actualContainer: 'mp4' | 'webm' = type.toLowerCase().includes('mp4') ? 'mp4' : 'webm';
+        if (actualContainer === 'webm') {
+          try {
+            blob = await fixWebmDuration(rawBlob, durationMs, { logger: false });
+          } catch {
+            setState((previous) => ({
+              ...previous,
+              error: 'The clip was saved, but its WebM duration metadata could not be repaired.',
+            }));
+          }
+        }
+
+        const fileName = `VeloLens-${panelName.replace(/\s+/g, '-')}-${timestamp()}.${actualContainer}`;
         const file = new File([blob], fileName, { type, lastModified: Date.now() });
         onRecordingCompleteRef.current(file);
 
@@ -250,7 +385,13 @@ export function useCameraCapture(
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       };
       recorder.start(1000);
-      setState((previous) => ({ ...previous, recording: true, error: null }));
+      recordingStartedAtRef.current = performance.now();
+      setState((previous) => ({
+        ...previous,
+        recording: true,
+        error: null,
+        activeRecordingContainer: format.extension,
+      }));
     } catch {
       setState((previous) => ({
         ...previous,
@@ -276,6 +417,7 @@ export function useCameraCapture(
     videoRef: attachStream,
     startCamera,
     selectCamera,
+    setRecordingContainer,
     stopCamera,
     startRecording,
     stopRecording,
