@@ -266,8 +266,14 @@ export default function VideoPlayer({ label, handle, camera, markupHandle, side,
             </div>
             {camera.state.active ? (
               <div className="absolute top-3 right-3 flex items-center gap-1.5 bg-red-950/75 backdrop-blur-sm text-xs text-red-200 px-2.5 py-1 rounded-md pointer-events-none">
-                <span className={`w-2 h-2 rounded-full ${camera.state.recording ? 'bg-red-400 animate-pulse' : 'bg-emerald-400'}`} />
-                {camera.state.recording ? 'REC' : 'LIVE'}
+                <span className={`w-2 h-2 rounded-full ${
+                  camera.state.recordingPaused
+                    ? 'bg-amber-400'
+                    : camera.state.recording
+                      ? 'bg-red-400 animate-pulse'
+                      : 'bg-emerald-400'
+                }`} />
+                {camera.state.recordingPaused ? 'PAUSED' : camera.state.recording ? 'REC' : 'LIVE'}
               </div>
             ) : fileName && (
               <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm text-xs text-slate-300 px-2.5 py-1 rounded-md max-w-[50%] min-w-0 truncate pointer-events-none">

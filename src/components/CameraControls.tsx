@@ -1,5 +1,19 @@
 import type { CameraCaptureHandle } from '../hooks/useCameraCapture';
 
+function formatRecordingTime(elapsedMs: number): string {
+  const totalTenths = Math.floor(elapsedMs / 100);
+  const tenths = totalTenths % 10;
+  const totalSeconds = Math.floor(totalTenths / 10);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  const clock = hours > 0
+    ? `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+    : `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  return `${clock}.${tenths}`;
+}
+
 export default function CameraControls({
   camera,
   compact = false,
@@ -100,6 +114,30 @@ export default function CameraControls({
             ? `Stop & save ${camera.state.activeRecordingContainer?.toUpperCase() ?? ''}`
             : 'Record'}
         </button>
+        {camera.state.recording && (
+          <>
+            <button
+              onClick={(event) => {
+                event.stopPropagation();
+                if (camera.state.recordingPaused) camera.resumeRecording();
+                else camera.pauseRecording();
+              }}
+              className="relative z-10 text-blue-400 hover:text-blue-300 py-0.5 font-medium transition-colors whitespace-nowrap"
+              aria-label={camera.state.recordingPaused ? 'Resume recording' : 'Pause recording'}
+            >
+              {camera.state.recordingPaused ? 'Resume' : 'Pause'}
+            </button>
+            <span
+              className={`font-mono tabular-nums whitespace-nowrap ${
+                camera.state.recordingPaused ? 'text-amber-400' : 'text-red-400'
+              }`}
+              title={camera.state.recordingPaused ? 'Recording paused' : 'Active recording time'}
+              aria-label={`Active recording time ${formatRecordingTime(camera.state.recordingElapsedMs)}`}
+            >
+              {formatRecordingTime(camera.state.recordingElapsedMs)}
+            </span>
+          </>
+        )}
         {fps && (
           <span
             className={`${fps >= 59 ? 'text-slate-600' : 'text-amber-400'} whitespace-nowrap`}

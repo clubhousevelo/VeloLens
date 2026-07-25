@@ -615,7 +615,7 @@ export default function OverlayView({ handle1, handle2, camera1, camera2, markup
             value={blendPosition}
             onChange={(e) => setBlendPosition(parseInt(e.target.value))}
             disabled={!bothLoaded}
-            className="flex-1 disabled:cursor-not-allowed"
+            className="blend-slider flex-1 disabled:cursor-not-allowed"
           />
           <span className="text-xs text-purple-400 font-medium shrink-0">V2</span>
           <span className="text-xs text-slate-400 tabular-nums w-8 shrink-0">{Math.round(opacity2 * 100)}%</span>

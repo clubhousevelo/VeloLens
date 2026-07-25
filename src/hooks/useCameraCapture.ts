@@ -11,6 +11,8 @@ export type RecordingContainer = 'auto' | 'mp4' | 'webm';
 export interface CameraCaptureState {
   active: boolean;
   recording: boolean;
+  recordingPaused: boolean;
+  recordingElapsedMs: number;
   frameRate: number | null;
   width: number;
   height: number;
@@ -32,12 +34,16 @@ export interface CameraCaptureHandle {
   setRecordingContainer: (container: RecordingContainer) => void;
   stopCamera: () => void;
   startRecording: () => void;
+  pauseRecording: () => void;
+  resumeRecording: () => void;
   stopRecording: () => void;
 }
 
 const INITIAL_STATE: CameraCaptureState = {
   active: false,
   recording: false,
+  recordingPaused: false,
+  recordingElapsedMs: 0,
   frameRate: null,
   width: 0,
   height: 0,
@@ -207,7 +213,10 @@ export function useCameraCapture(
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recordingFormatRef = useRef(recordingType('auto'));
-  const recordingStartedAtRef = useRef(0);
+  const recordingTimerRef = useRef<number | null>(null);
+  const recordingSegmentStartedAtRef = useRef(0);
+  const recordingElapsedRef = useRef(0);
+  const recordingPausedRef = useRef(false);
   const onRecordingCompleteRef = useRef(onRecordingComplete);
   onRecordingCompleteRef.current = onRecordingComplete;
 
@@ -219,10 +228,62 @@ export function useCameraCapture(
     if (streamRef.current) element.play().catch(() => {});
   }, []);
 
+  const clearRecordingTimer = useCallback(() => {
+    if (recordingTimerRef.current !== null) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+  }, []);
+
+  const currentRecordingElapsed = useCallback(() => {
+    if (recordingPausedRef.current) return recordingElapsedRef.current;
+    return recordingElapsedRef.current
+      + Math.max(0, performance.now() - recordingSegmentStartedAtRef.current);
+  }, []);
+
+  const startRecordingTimer = useCallback(() => {
+    clearRecordingTimer();
+    recordingTimerRef.current = window.setInterval(() => {
+      setState((previous) => ({
+        ...previous,
+        recordingElapsedMs: currentRecordingElapsed(),
+      }));
+    }, 100);
+  }, [clearRecordingTimer, currentRecordingElapsed]);
+
   const stopRecording = useCallback(() => {
     const recorder = recorderRef.current;
-    if (recorder && recorder.state !== 'inactive') recorder.stop();
-  }, []);
+    if (recorder && recorder.state !== 'inactive') {
+      recordingElapsedRef.current = currentRecordingElapsed();
+      recordingPausedRef.current = true;
+      clearRecordingTimer();
+      recorder.stop();
+    }
+  }, [clearRecordingTimer, currentRecordingElapsed]);
+
+  const pauseRecording = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== 'recording') return;
+    recordingElapsedRef.current = currentRecordingElapsed();
+    recordingPausedRef.current = true;
+    clearRecordingTimer();
+    recorder.pause();
+    setState((previous) => ({
+      ...previous,
+      recordingPaused: true,
+      recordingElapsedMs: recordingElapsedRef.current,
+    }));
+  }, [clearRecordingTimer, currentRecordingElapsed]);
+
+  const resumeRecording = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== 'paused') return;
+    recorder.resume();
+    recordingSegmentStartedAtRef.current = performance.now();
+    recordingPausedRef.current = false;
+    startRecordingTimer();
+    setState((previous) => ({ ...previous, recordingPaused: false }));
+  }, [startRecordingTimer]);
 
   const stopCamera = useCallback(() => {
     stopRecording();
@@ -282,6 +343,8 @@ export function useCameraCapture(
       setState({
         active: true,
         recording: false,
+        recordingPaused: false,
+        recordingElapsedMs: 0,
         frameRate: settings?.frameRate ?? null,
         width: settings?.width ?? 0,
         height: settings?.height ?? 0,
@@ -341,9 +404,12 @@ export function useCameraCapture(
         if (event.data.size > 0) chunksRef.current.push(event.data);
       };
       recorder.onerror = () => {
+        clearRecordingTimer();
+        recordingPausedRef.current = false;
         setState((previous) => ({
           ...previous,
           recording: false,
+          recordingPaused: false,
           error: 'The recording stopped because of a camera error.',
         }));
       };
@@ -351,10 +417,19 @@ export function useCameraCapture(
         const { mimeType } = recordingFormatRef.current;
         const type = recorder.mimeType || mimeType || 'video/webm';
         const rawBlob = new Blob(chunksRef.current, { type });
-        const durationMs = Math.max(1, performance.now() - recordingStartedAtRef.current);
+        const durationMs = Math.max(1, currentRecordingElapsed());
+        recordingElapsedRef.current = durationMs;
+        recordingPausedRef.current = true;
+        clearRecordingTimer();
         chunksRef.current = [];
         recorderRef.current = null;
-        setState((previous) => ({ ...previous, recording: false, activeRecordingContainer: null }));
+        setState((previous) => ({
+          ...previous,
+          recording: false,
+          recordingPaused: false,
+          recordingElapsedMs: 0,
+          activeRecordingContainer: null,
+        }));
         if (rawBlob.size === 0) return;
 
         let blob = rawBlob;
@@ -385,21 +460,30 @@ export function useCameraCapture(
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       };
       recorder.start(1000);
-      recordingStartedAtRef.current = performance.now();
+      recordingElapsedRef.current = 0;
+      recordingSegmentStartedAtRef.current = performance.now();
+      recordingPausedRef.current = false;
+      startRecordingTimer();
       setState((previous) => ({
         ...previous,
         recording: true,
+        recordingPaused: false,
+        recordingElapsedMs: 0,
         error: null,
         activeRecordingContainer: format.extension,
       }));
     } catch {
+      clearRecordingTimer();
+      recordingPausedRef.current = false;
       setState((previous) => ({
         ...previous,
         recording: false,
+        recordingPaused: false,
+        recordingElapsedMs: 0,
         error: 'Unable to start recording with this camera.',
       }));
     }
-  }, [panelName]);
+  }, [clearRecordingTimer, currentRecordingElapsed, panelName, startRecordingTimer]);
 
   useEffect(() => {
     const mediaDevices = navigator.mediaDevices;
@@ -420,6 +504,8 @@ export function useCameraCapture(
     setRecordingContainer,
     stopCamera,
     startRecording,
+    pauseRecording,
+    resumeRecording,
     stopRecording,
   };
 }

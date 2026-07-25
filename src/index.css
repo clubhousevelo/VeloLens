@@ -49,6 +49,19 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 0 6px rgba(96, 165, 250, 0.4);
 }
 
+/* Overlay blend slider: pill-shaped thumb */
+input.blend-slider::-webkit-slider-thumb {
+  width: 24px;
+  height: 12px;
+  border-radius: 6px;
+}
+
+input.blend-slider::-moz-range-thumb {
+  width: 24px;
+  height: 12px;
+  border-radius: 6px;
+}
+
 video::-webkit-media-controls {
   display: none !important;
 }
